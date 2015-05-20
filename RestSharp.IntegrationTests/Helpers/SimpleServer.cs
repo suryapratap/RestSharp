@@ -1,54 +1,81 @@
-﻿using System;
-using System.Net;
-using System.Threading;
-
-namespace RestSharp.IntegrationTests.Helpers
+﻿namespace RestSharp.IntegrationTests.Helpers
 {
-	public class SimpleServer : IDisposable
-	{
-		readonly HttpListener _listener;
-		readonly Action<HttpListenerContext> _handler;
-		Thread _processor;
+    using System;
+    using System.Net;
+    using System.Security;
+    using System.Threading;
 
-		public static SimpleServer Create(string url, Action<HttpListenerContext> handler, AuthenticationSchemes authenticationSchemes = AuthenticationSchemes.Anonymous)
-		{
-			var listener = new HttpListener
-			{
-				Prefixes = { url },
-				AuthenticationSchemes = authenticationSchemes
-			};
-			var server = new SimpleServer(listener, handler);
-			server.Start();
-			return server;
-		}
+    public class SimpleServer : IDisposable
+    {
+        private readonly HttpListener listener;
+        private readonly Action<HttpListenerContext> handler;
+        private Thread thread;
 
-		SimpleServer(HttpListener listener, Action<HttpListenerContext> handler)
-		{
-			_listener = listener;
-			_handler = handler;
-		}
+        private SimpleServer(HttpListener listener, Action<HttpListenerContext> handler)
+        {
+            this.listener = listener;
+            this.handler = handler;
+        }
 
-		public void Start()
-		{
-			if(!_listener.IsListening)
-			{
-				_listener.Start();
+        public static SimpleServer Create(
+            string url,
+            Action<HttpListenerContext> handler,
+            AuthenticationSchemes authenticationSchemes = AuthenticationSchemes.Anonymous)
+        {
+            var listener = new HttpListener { Prefixes = { url }, AuthenticationSchemes = authenticationSchemes };
+            var server = new SimpleServer(listener, handler);
 
-				_processor = new Thread(() =>
-				{
-					var context = _listener.GetContext();
-					_handler(context);
-					context.Response.Close();
-				}) { Name = "WebServer" };
-				_processor.Start();
-			}
-		}
+            server.Start();
+            return server;
+        }
 
-		public void Dispose()
-		{
-			_processor.Abort();
-			_listener.Stop();
-			_listener.Close();
-		}
-	}
+        public void Start()
+        {
+            if (this.listener.IsListening)
+            {
+                return;
+            }
+
+            this.listener.Start();
+
+            this.thread = new Thread(() =>
+            {
+                var context = this.listener.GetContext();
+                this.handler(context);
+                context.Response.Close();
+            }) { Name = "WebServer" };
+
+            this.thread.Start();
+        }
+
+        public void Dispose()
+        {
+            try
+            {
+                this.thread.Abort();
+            }
+            catch (ThreadStateException threadStateException)
+            {
+                Console.WriteLine("Issue aborting thread - {0}.", threadStateException.Message);
+            }
+            catch (SecurityException securityException)
+            {
+                Console.WriteLine("Issue aborting thread - {0}.", securityException.Message);
+            }
+
+            if (this.listener.IsListening)
+            {
+                try
+                {
+                    this.listener.Stop();
+                }
+                catch (ObjectDisposedException objectDisposedException)
+                {
+                    Console.WriteLine("Issue stopping listener - {0}", objectDisposedException.Message);
+                }
+            }
+
+            this.listener.Close();
+        }
+    }
 }
